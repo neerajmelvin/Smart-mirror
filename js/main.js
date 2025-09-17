@@ -738,3 +738,99 @@ if (typeof Object.assign !== "function") {
 }
 
 MM.init();
+
+// NASA background slideshow (changes every 10 seconds) with preload + crossfade
+window.addEventListener("load", () => {
+    const wrapper = document.getElementById("bg-image-container");
+    const imgA = document.getElementById("bg-image-1");
+    const imgB = document.getElementById("bg-image-2");
+    const blurA = document.getElementById("bg-blur-1");
+    const blurB = document.getElementById("bg-blur-2");
+	if (!wrapper || !imgA || !imgB) return;
+
+	let images = [];
+	let idx = 0;
+	let rotateTimer = null;
+	let useA = true;
+
+	const preload = (url) => new Promise((resolve, reject) => {
+		const i = new Image();
+		i.onload = () => resolve(url);
+		i.onerror = reject;
+		i.src = url;
+	});
+
+    const show = async (url) => {
+		if (!url) return;
+		const bust = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+		try { await preload(bust); } catch {}
+		const active = useA ? imgA : imgB;
+		const hidden = useA ? imgB : imgA;
+		const activeBlur = useA ? blurA : blurB;
+		const hiddenBlur = useA ? blurB : blurA;
+		
+		hidden.src = bust;
+		hiddenBlur.style.backgroundImage = `url(${bust})`;
+		
+		hidden.classList.add("active");
+		hiddenBlur.classList.add("active");
+		active.classList.remove("active");
+		activeBlur.classList.remove("active");
+		
+		useA = !useA;
+	};
+
+	const startRotate = () => {
+		if (rotateTimer) clearInterval(rotateTimer);
+		rotateTimer = setInterval(async () => {
+			if (images.length === 0) return;
+			idx = (idx + 1) % images.length;
+			await show(images[idx]);
+		}, 10000); // 10 seconds
+	};
+
+	const fetchAPODBatch = async () => {
+		try {
+			const apiKey = window.NASA_API_KEY || "DEMO_KEY";
+			const resp = await fetch(`https://api.nasa.gov/planetary/apod?api_key=${apiKey}&count=20`);
+			const data = await resp.json();
+			const urls = (Array.isArray(data) ? data : []).filter((d) => d.media_type === "image").map((d) => d.hdurl || d.url).filter(Boolean);
+			if (urls.length) {
+				images = urls;
+				idx = 0;
+				await show(images[idx]);
+				startRotate();
+				return true;
+			}
+		} catch (e) {
+			// ignore
+		}
+		return false;
+	};
+
+	const fetchNASAImageLibrary = async () => {
+		try {
+			const resp = await fetch("https://images-api.nasa.gov/search?media_type=image&q=space");
+			const data = await resp.json();
+			const items = (((data || {}).collection || {}).items) || [];
+			const urls = items.map((it) => (it.links && it.links[0] && it.links[0].href) || null).filter(Boolean);
+			if (urls.length) {
+				images = urls.slice(0, 30);
+				idx = 0;
+				await show(images[idx]);
+				startRotate();
+				return true;
+			}
+		} catch (e) {
+			// ignore
+		}
+		return false;
+	};
+
+	(async () => {
+		const ok = await fetchAPODBatch();
+		if (!ok) await fetchNASAImageLibrary();
+		// refresh sources hourly to vary the slideshow
+		setInterval(fetchAPODBatch, 60 * 60 * 1000);
+	})();
+});
